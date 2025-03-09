@@ -1,0 +1,270 @@
+    SUBROUTINE ACCT.ALERT(ENTRY.TYPE,ENTRY.VAL,ENTRY.ID,ENTRY.ACT)
+*-----------------------------------------------------------------------------
+* Modification History
+*----------------------------------------------------------------------------------------------------------------------
+* 12/06/2019   SOFGEN         CBARW-UPG-R13-R18        GET.LOC.REF changed to MULTI.GET.LOC.REF
+*----------------------------------------------------------------------------------------------------------------------
+    $INCLUDE ../T24_BP I_COMMON
+    $INCLUDE ../T24_BP I_EQUATE
+    $INCLUDE ../T24_BP I_F.ACCOUNT
+    $INCLUDE ../T24_BP I_F.CUSTOMER
+    $INCLUDE ../T24_BP I_F.COMPANY
+    $INCLUDE ../T24_BP I_F.CUSTOMER.ACCOUNT
+    $INCLUDE ../T24_BP I_F.ACCOUNT
+    $INCLUDE ../T24_BP I_F.FUNDS.TRANSFER
+    $INCLUDE ../T24_BP I_F.TELLER
+    $INCLUDE ../T24_BP I_F.STMT.ENTRY
+    $INCLUDE ../T24_BP I_F.TRANSACTION
+    $INCLUDE ../T24_BP I_F.COMPANY
+    $INCLUDE ALERTS.BP I_F.H.CBA.CUSTOMER.ALERTS.TABLE
+* $INSERT EMC.BP I_F.CBA.ACCT.PARAM
+    $INCLUDE ../T24_BP I_F.DEPT.ACCT.OFFICER
+*DEBUG
+
+    IF (ENTRY.TYPE = 'STMT' AND ENTRY.VAL = 'AUT') THEN
+
+        GOSUB INITIALISE
+        GOSUB PROCESS
+
+    END
+    RETURN
+
+*----------
+INITIALISE:
+*----------
+
+    FN.ACCOUNT ='F.ACCOUNT'
+    F.ACCOUNT = ''
+    CALL OPF(FN.ACCOUNT,F.ACCOUNT)
+
+    FN.CUSTOMER = 'F.CUSTOMER'
+    F.CUSTOMER = ''
+    CALL OPF(FN.CUSTOMER,F.CUSTOMER)
+
+    FN.TXN ='F.TRANSACTION'
+    F.TXN = ''
+    CALL OPF(FN.TXN,F.TXN)
+
+    FN.STMT = 'F.STMT.ENTRY'
+    F.STMT = ''
+    CALL OPF(FN.STMT,F.STMT)
+
+*    FN.ACCT.PARAM = 'F.CBA.ACCT.PARAM'
+*   F.ACCT.PARAM = ''
+*  CALL OPF(FN.ACCT.PARAM,F.ACCT.PARAM)
+
+    FN.DAO = 'F.DEPT.ACCT.OFFICER'
+    F.DAO = ''
+    CALL OPF(FN.DAO,F.DAO)
+
+    FN.FT = 'F.FUNDS.TRANSFER'
+    F.FT = ''
+    CALL OPF(FN.FT,F.FT)
+
+    FN.AL = 'F.FT.ALERTS.SMS'
+    F.AL = ''
+    CALL OPF(FN.AL, F.AL)
+
+    RETURN
+
+*------
+PROCESS:
+*------
+*SE.ID = 185181630656065.000001
+*READ STMT.REC FROM F.STMT,SE.ID ELSE STMT.REC = ''
+    STMT.REC = ''
+    STMT.REC = ENTRY.ACT
+    ACC.REC = ''
+    YR.CUS.ID = ''
+    IF (STMT.REC) THEN
+        ACC.ID = STMT.REC<1>
+        ACC.REC = ''
+        SMS.ALERT.POS = ''
+        CALL F.READ(FN.ACCOUNT,ACC.ID,ACC.REC,F.ACCOUNT,ACC.ERR)
+*CBARW-UPG-R13-R18-S
+*        CALL GET.LOC.REF("ACCOUNT","SMS.ALERT",SMS.ALERT.POS)
+        YAPPLICATION.NAME="ACCOUNT":@FM:"TRANSACTION"
+        YFIELD.NAME = "SMS.ALERT":@FM:"SMS.ALERT"
+        LREF.POS=''
+        CALL MULTI.GET.LOC.REF(YAPPLICATION.NAME,YFIELD.NAME,LREF.POS)
+        SMS.ALERT.POS = LREF.POS<1,1>
+        TXN.SMS.ALERT.POS = LREF.POS<2,1>
+*CBARW-UPG-R13-R18-E
+
+        YR.SMS.ALERT = ACC.REC<AC.LOCAL.REF,SMS.ALERT.POS>
+        YR.CUS.ID = ACC.REC<AC.CUSTOMER>
+        YR.APPLICATION = STMT.REC<24>
+        IF YR.SMS.ALERT = 'YES' THEN
+
+            YR.TXN.ID = STMT.REC<4>
+            TXN.REC = ''
+            CALL F.READ(FN.TXN,YR.TXN.ID,TXN.REC,F.TXN,TXN.ERR)
+*CBARW-UPG-R13-R18-S
+*            TXN.SMS.ALERT.POS = ''
+*            CALL GET.LOC.REF("TRANSACTION","SMS.ALERT",TXN.SMS.ALERT.POS)
+*CBARW-UPG-R13-R18-E
+*         CALL GET.LOC.REF("TRANSACTION","SAS.DESC",TXN.SAS.DESC.POS)
+            YR.TXN.CODE = TXN.REC<AC.TRA.LOCAL.REF,TXN.SMS.ALERT.POS>
+            YR.TXN.TYPE.DESC = TXN.REC<AC.TRA.NARRATIVE>
+*          YR.TXN.SAS.DESC = TXN.REC<AC.TRA.LOCAL.REF,TXN.SAS.DESC.POS>
+
+*   CALL F.READ(FN.ACCT.PARAM,'API.ALERT',ACCT.PARAM.REC,F.ACCT.PARAM,ACCT.PARAM.ERR)
+*    LOCATE ACC.ID IN ACCT.PARAM.REC<CBA.PAR.ACCT.NUMBER,1> SETTING API.ALERT.POS ELSE API.ALERT.POS = ''
+
+*   IF YR.TXN.CODE = 'YES' OR (API.ALERT.POS AND YR.TXN.SAS.DESC <> 'CHARGE') THEN
+
+            IF YR.TXN.CODE = 'YES' THEN
+
+                CALL F.READ(FN.CUSTOMER,YR.CUS.ID,CUS.REC,F.CUSTOMER,CUS.ERR)
+                YR.ACC.CURR = ACC.REC<AC.CURRENCY>
+                YR.ACC.WORK.BAL = ACC.REC<AC.WORKING.BALANCE>
+                YR.ACC.TITLE = ACC.REC<AC.ACCOUNT.TITLE.1>
+                MOBILE.NO.POS = ''
+                CUST.EMAIL.ID.POS = ''
+*CALL GET.LOC.REF("ACCOUNT","MOBILE.NO",MOBILE.NO.POS)
+* CALL GET.LOC.REF("ACCOUNT","CUST.EMAIL.ID",CUST.EMAIL.ID.POS)
+*  CALL GET.LOC.REF("CUSTOMER","CUST.BUS.SEG",CUST.BUS.SEG.POS)
+                YR.SMS.NUMBER = CUS.REC<EB.CUS.PHONE.1>
+                IF NOT(YR.SMS.NUMBER) THEN
+                    YR.SMS.NUMBER = CUS.REC<EB.CUS.SMS.1>
+                END
+                YR.EMAIL.ADD = CUS.REC<EB.CUS.EMAIL.1>
+*                *YR.ACCT.TYPE = CUS.REC<EB.CUS.LOCAL.REF,CUST.BUS.SEG.POS>
+
+                YR.DATE = OCONV(DATE(), "D2/")
+                YR.DATE = YR.DATE[7,2]:YR.DATE[1,2]:YR.DATE[4,2]
+                Y.TIME = OCONV(TIME(), "MT")
+                CONVERT ":" TO '' IN Y.TIME
+                YR.OS.DATE.TIME = YR.DATE:Y.TIME
+
+                FN.COMP ='F.COMPANY'
+                F.COMP = ''
+                CALL OPF(FN.COMP,F.COMP)
+
+                FN.ALERTS ='F.H.CBA.CUSTOMER.ALERTS.TABLE'
+                F.ALERTS = ''
+                CALL OPF(FN.ALERTS,F.ALERTS)
+                YR.ALERT.REC<ALERT.STMT.ENTRY.ID> = ENTRY.ID
+                YR.ALERT.REC<ALERT.ACCOUNT.NUMBER> = STMT.REC<1>
+                YR.ALERT.REC<ALERT.AMOUNT.LCY> = STMT.REC<3>
+                YR.ALERT.REC<ALERT.AMOUNT.FCY> = STMT.REC<13>
+                YR.ALERT.REC<ALERT.CURRENCY> = STMT.REC<12>
+                YR.ALERT.REC<ALERT.EXCHANGE.RATE> = STMT.REC<14>
+                YR.ALERT.REC<ALERT.TRANSACTION.CODE> = STMT.REC<4>
+                YR.ALERT.REC<ALERT.NARRATIVE> = STMT.REC<6>[1,35]
+                YR.ALERT.REC<ALERT.ACC.OFFICER> = STMT.REC<9>
+                YR.ALERT.REC<ALERT.VALUE.DATE> = STMT.REC<11>
+                YR.ALERT.REC<ALERT.BOOKING.DATE> = STMT.REC<25>
+                Y.TXN.REF = STMT.REC<23>
+                YR.ALERT.REC<ALERT.TRANS.REFERENCE> =  STMT.REC<23>
+
+                YR.ALERT.REC<ALERT.TRANS.REFERENCE> = STMT.REC<23>[1,35]
+                YR.TXN.REFERENCE = STMT.REC<23>
+
+                YR.ALERT.REC<ALERT.SYSTEM.ID> = STMT.REC<24>
+
+*Get account balance, read local currency from Company
+                COMP.REC = ''
+                CALL F.READ(FN.COMP,ID.COMPANY,COMP.REC,F.COMP,COMP.ERR)
+                YR.COMP.CURR = COMP.REC<EB.COM.LOCAL.CURRENCY>
+                YR.BAL = ''
+                IF (YR.ACC.CURR = YR.COMP.CURR) THEN
+*    YR.BAL = YR.ACC.WORK.BAL + STMT.REC<3>
+                    YR.BAL = YR.ACC.WORK.BAL
+                    YR.ALERT.REC<ALERT.AMOUNT> = STMT.REC<3>
+                END ELSE
+* YR.BAL = YR.ACC.WORK.BAL + STMT.REC<13>
+                    YR.BAL = YR.ACC.WORK.BAL
+                    YR.ALERT.REC<ALERT.AMOUNT> = STMT.REC<13>
+                END
+                IF (YR.ALERT.REC<ALERT.AMOUNT> < 0) THEN
+                    YR.ALERT.REC<ALERT.DR.CR.INDICATOR> = 'debit'
+                END ELSE
+                    YR.ALERT.REC<ALERT.DR.CR.INDICATOR> = 'credit'
+                END
+                YR.ALERT.REC<ALERT.ACC.BALANCE> = YR.BAL
+                YR.ALERT.REC<ALERT.SMS.NUMBER> = YR.SMS.NUMBER
+                YR.ALERT.REC<ALERT.EMAIL.ADDRESS> = YR.EMAIL.ADD
+                YR.ALERT.REC<ALERT.STATUS> = "QUEUED"
+                YR.ALERT.REC<31> = ACC.REC<AC.CATEGORY>
+                YR.ALERT.REC<ALERT.ACCT.NAME> = YR.ACC.TITLE
+*                YR.ALERT.REC<ALERT.ACCT.TYPE> = YR.ACCT.TYPE
+                YR.ALERT.REC<ALERT.ACCT.SMS.ALERT> = YR.SMS.ALERT
+                YR.ALERT.REC<ALERT.TXN.DATE.TIME> = YR.OS.DATE.TIME
+
+                IF YR.TXN.REFERENCE[1,2] EQ 'FT' THEN
+                    GOSUB GET.FT.DETAILS
+                END
+
+* IF API.ALERT.POS THEN
+*    YR.ALERT.REC<ALERT.ALERT.TYPE> = "API"
+*   IF YR.APPLICATION EQ 'FUNDS.TRANSFER' THEN
+
+*          YR.ALERT.REC<ALERT.PHONE.NO> = R.NEW(FT.LOCAL.REF)<1,Y.MOBILE.NO.POS>
+*                       YR.ALERT.REC<ALERT.OTHER.ACCOUNT> = R.NEW(FT.LOCAL.REF)<1,Y.OUR.ACCT.NO.POS>
+*                      IF R.NEW(FT.TRANSACTION.TYPE) EQ 'ACMR' THEN
+*                         YR.ALERT.REC<ALERT.NARRATIVE> = R.NEW(FT.DEBIT.THEIR.REF)
+*           END
+*      END
+* END
+
+                Y.LRF.POS=''
+                Y.APPLICATION = 'H.CBA.CUSTOMER.ALERTS.TABLE'
+                Y.FIELD.NAME = 'TXN.DEPT.CODE':VM:'TXN.DEPT.NAME':VM:'TXN.TYPE.DESC':VM:'FT.CR.NARRATION'
+
+                CALL MULTI.GET.LOC.REF(Y.APPLICATION,Y.FIELD.NAME,Y.LRF.POS)
+                Y.TXN.DEPT.CODE.POS =Y.LRF.POS<1,1>
+                Y.TXN.DEPT.NAME.POS =Y.LRF.POS<1,2>
+                Y.TXN.TYPE.DESC.POS = Y.LRF.POS<1,3>
+                Y.FT.CR.NARRATION.POS = Y.LRF.POS<1,4>
+
+                Y.TXN.DEPT.CODE = STMT.REC<AC.STE.DEPARTMENT.CODE>
+                CALL F.READ(FN.DAO,Y.TXN.DEPT.CODE,DAO.REC,F.DAO,DAO.ERR)
+                Y.TXN.DEPT.NAME = DAO.REC<EB.DAO.NAME>
+                CONVERT "," TO " " IN Y.TXN.DEPT.NAME
+
+                YR.ALERT.REC<ALERT.LOCAL.REF,Y.TXN.DEPT.CODE.POS> = Y.TXN.DEPT.CODE
+                YR.ALERT.REC<ALERT.LOCAL.REF,Y.TXN.DEPT.NAME.POS> = Y.TXN.DEPT.NAME
+                YR.ALERT.REC<ALERT.LOCAL.REF,Y.TXN.TYPE.DESC.POS> = YR.TXN.TYPE.DESC
+
+                IF YR.APPLICATION EQ 'FUNDS.TRANSFER' THEN
+                    YR.ALERT.REC<ALERT.LOCAL.REF,Y.FT.CR.NARRATION.POS> = R.NEW(FT.LOCAL.REF)<1,Y.FT.CR.NARRATION.FT.POS>
+
+                END
+                CALL F.READ(FN.AL,YR.TXN.REFERENCE,AL.REC,F.AL,AL.ERR)
+                chrgAmt = AL.REC<2>
+                cmmAmt=AL.REC<1>
+                IF NOT(chrgAmt) THEN
+                    chrgAmt = 0.0
+                END
+                YR.ALERT.REC<30> = chrgAmt
+                IF NOT(commAmt) THEN
+                    commAmt = 0.00
+                END
+                YR.ALERT.REC<29> = commAmt
+                CONVERT "." TO "" IN ENTRY.ID
+                CALL F.WRITE(FN.ALERTS,ENTRY.ID,YR.ALERT.REC)
+                CALL JOURNAL.UPDATE("")
+            END
+        END
+    END
+    RETURN
+
+
+GET.FT.DETAILS:
+
+*IF YR.TXN.REFERENCE[1,2] = 'FT' THEN
+    CALL F.READ(FN.FT,YR.TXN.REFERENCE,FT.REC,F.FT,FT.ERR)
+    Y.LRF.POS=''
+    YR.APPLICATION = 'FUNDS.TRANSFER'
+    Y.FIELD.NAME = 'MOBILE.NO':VM:'OUR.ACCT.NO':VM:'FT.CR.NARRATION'
+
+    CALL MULTI.GET.LOC.REF(YR.APPLICATION,Y.FIELD.NAME,Y.LRF.POS)
+    Y.MOBILE.NO.POS =Y.LRF.POS<1,1>
+    Y.OUR.ACCT.NO.POS =Y.LRF.POS<1,2>
+    Y.FT.CR.NARRATION.FT.POS =Y.LRF.POS<1,3>
+
+
+*END
+    RETURN
+END

@@ -1,0 +1,177 @@
+*-----------------------------------------------------------------------------
+* <Rating>368</Rating>
+*-----------------------------------------------------------------------------
+    SUBROUTINE NCBA.DE.ALLIANCE.OUTPUT(MSG.NO, R.MSG, GENERIC.DATA, ERR.MSG)
+
+    $INSERT ../T24_BP I_COMMON
+    $INSERT ../T24_BP I_EQUATE
+    $INSERT ../T24_BP I_DE.GENERIC.DATA
+    $INSERT ../T24_BP I_F.DE.INTERFACE
+    $INSERT ../T24_BP I_F.CUSTOMER
+    $INSERT ../T24_BP I_F.ACCOUNT
+
+    F.ALLIANCE.INPUT = "F.ALLIANCE.INPUT"
+    F.ALLIANCE.COPY = "SWIFT.OUT"
+    F.ALLIANCE.MAX = "F.ALLIANCE.MAX"
+
+    FN.CUSTOMER = "FCBR.CUSTOMER"
+    F.CUSTOMER = ""
+    CALL OPF(FN.CUSTOMER,F.CUSTOMER)
+
+    CRT GENERIC.DATA
+    CRT ERR.MSG
+    CRT MSG.NO
+    CRT R.MSG
+    OG.FILENAME = MSG.NO:".txt"
+    OG.MESSAGE = R.MSG
+    CRT OG.FILENAME
+    GOSUB PROCESS
+    GOSUB SEND.EMAIL
+
+PROCESS:
+*-------
+
+    TAG.CHECK1 = ":50F:"
+    TAG.CHECK2 = ":"
+    Y.FOLDER = F.ALLIANCE.INPUT
+*OPENPATH Y.FOLDER TO F.OUT THEN
+    R.MSG = EREPLACE(R.MSG,CHARX(10),"")
+    R.MSG = EREPLACE(R.MSG,CHARX(13),@FM)
+    FINDSTR TAG.CHECK1 IN R.MSG SETTING XPOS,YPOS THEN
+        FLD.PART1 = R.MSG[FM,1,XPOS]
+        FLDS = R.MSG[FM,XPOS+1,99]
+        MSG.TO.FORMAT = FLDS<1>['/',2,1]
+        IF NOT(MSG.TO.FORMAT) THEN
+            MSG.TO.FORMAT = FLDS<1>['/',1,1]
+        END
+    END
+    XPOS = "" ; YPOS = ""
+    FINDSTR TAG.CHECK2 IN FLDS SETTING XPOS,YPOS THEN
+        FLD.PART2 = FLDS[FM,XPOS,99]
+    END
+    IF (FLD.PART1 <> "") AND (MSG.TO.FORMAT <> "") AND (FLD.PART2 <> "") THEN
+        R.MSG = FLD.PART1:FM:MSG.TO.FORMAT:FM:FLD.PART2
+    END
+
+
+    YPOS.ACCT.NO.FULL = FIELD(R.MSG,":25",2)
+    YPOS.ACCT.NO = FIELD(YPOS.ACCT.NO.FULL,":",2)[1,16]
+    CRT YPOS.ACCT.NO
+    MSG.NO := "-":YPOS.ACCT.NO
+    MSG.NO := ".txt"
+    MSG.FILENAME = MSG.NO
+    OG.FILENAME = MSG.NO
+    MSG.DETAIL = R.MSG
+
+
+***OPENPATH Y.FOLDER TO F.OUT THEN
+***WRITE R.MSG TO F.OUT,MSG.NO ON ERROR
+***ERROR.MSG = "UNABLE TO WRITE FORMATTED MESSAGE TO F.ALLAIANCE.INPUT"
+*** CRT ERROR.MSG
+***END
+***CALL JOURNAL.UPDATE("")
+*** CLOSE MSG.NO
+***END
+
+    IF GETENV("HOME",HOME.PATH) THEN
+        F.ALLIANCE.INPUT = HOME.PATH:"/F.ALLIANCE.INPUT"
+    END
+
+
+*F.ALLIANCE.INPUT = "/t24/t24pro/bnk/bnk.run/F.ALLIANCE.INPUT"
+    OPENSEQ F.ALLIANCE.INPUT,MSG.FILENAME TO F.SUCCESS.FILE ELSE CREATE MSG.FILENAME ELSE
+        CRT "UNABLE..."
+        RETURN
+    END
+
+    WRITESEQ OG.MESSAGE TO F.SUCCESS.FILE ELSE
+        CRT "UNABLE TO WRITE FILE":F.SUCCESS.FILE
+    END
+
+    CRT "FILE - ":F.SUCCESS.FILE
+
+    RETURN
+
+SEND.EMAIL:
+*------------
+
+*YPOS.ACCT = FIELD(R.MSG,"25:",2)
+    YPOS.ACCT= YPOS.ACCT.NO
+    CALL GET.ACCT.BRANCH(YPOS.ACCT,MNE,'')
+
+    FN.ACCT = 'F':MNE:'.ACCOUNT'
+    F.ACCT = ''
+    CALL OPF(FN.ACCT,F.ACCT)
+    CALL F.READ(FN.ACCT,YPOS.ACCT,R.ACCT,F.ACCT,ERR1)
+
+    Y.CUSTOMER = R.ACCT<AC.CUSTOMER>
+    Y.ACCT.NAME = R.ACCT<AC.ACCOUNT.TITLE.1>
+
+    IF GETENV("HOME",HOME.PATH) THEN
+        CRT "HOME PATH ...":HOME.PATH
+        F.PATH.INPUT = HOME.PATH:"/F.ALLIANCE.INPUT"
+    END
+
+    CALL F.READ(FN.CUSTOMER,Y.CUSTOMER,R.CUSTOMER,F.CUSTOMER,ERR2)
+    EMAIL.ADD = R.CUSTOMER<EB.CUS.EMAIL.1>
+    Y.SUBJECT = "SWIFT STATEMENT"
+    Y.BODY = "Please find attached your Test MT Statement"
+
+    CHANGE VM TO ";" IN EMAIL.ADD
+    CRT EMAIL.ADD
+
+    Y.ARRAY = EMAIL.ADD:",":Y.ACCT.NAME:",":Y.SUBJECT:",":Y.BODY:",":F.PATH.INPUT:"/":OG.FILENAME
+
+    IF EMAIL.ADD = "" THEN
+        CRT "EMAIL ADDRESS MISSING..."
+    END ELSE
+        packageName = 'com.mopanesystems.clientmanager.'
+        className = 'SendEmail'
+        methodName = 'send'
+        methodName = "$" : methodName
+        param = Y.ARRAY
+
+        CRT "Call to :":packageName:className:",":methodName
+        CRT "param = ":param
+
+        CRT 'calling CALLJ'
+
+        CALLJ packageName : className, methodName, param SETTING returnValue ON ERROR GOTO errHandler
+        CRT 'recieved from Java ' : returnValue
+
+        Y.IN = FIELD(returnValue,":",2)
+        Y.RETURN = FIELD(Y.IN,',',1)
+
+        Y.RESPONSE = FIELD(returnValue,'ResponseCode:',2)
+        Y.MESSAGE = FIELD(Y.RESPONSE,'ResponseMessage:',1)
+        Y.MES = TRIM(Y.MESSAGE, "", "D")
+
+        IF Y.RESPONSE EQ "" THEN
+errHandler:
+            CRT 'Error!!'
+            ERR = SYSTEM(0)
+            BEGIN CASE
+            CASE ERR = 1
+                CRT 'JVM releated error'
+            CASE ERR = 2
+                CRT 'Cannot find the JVM. Check your environment variables'
+            CASE ERR = 3
+                CRT 'Cannot find class ' : className : '. Check your classpath'
+            CASE ERR = 4
+                CRT 'Unicode conversion ERROR'
+            CASE ERR = 5
+                CRT 'Cannot find method ' : methodName
+            CASE ERR = 6
+                CRT 'JVM releated error'
+            CASE ERR = 8
+                CRT 'JVM releated error'
+            CASE 1  ;* default case
+                CRT 'Other Errors - ':returnValue
+            END CASE
+        END ELSE
+            CRT "Success!! Email has been sent"
+            EXECUTE "COPY FROM F.ALLIANCE.INPUT TO F.ALLIANCE.INPUT.SENT ":MSG.NO:" DELETING"
+        END
+    END
+    RETURN
+END

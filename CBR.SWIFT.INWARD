@@ -1,0 +1,108 @@
+    SUBROUTINE CBR.SWIFT.INWARD
+    $INSERT ../T24_BP I_COMMON
+    $INSERT ../T24_BP I_EQUATE
+    $INSERT ../T24_BP I_F.AGENCY
+    $INSERT ../T24_BP I_GTS.COMMON
+    $INSERT ../T24_BP I_F.OFS.SOURCE
+
+    GOSUB INIT
+    GOSUB PROCESS
+
+    RETURN
+
+INIT:
+    FN.FOLDER = "/t24/t24pro/bnk/bnk.run/SWIFT.IN"
+    F.FOLDER = ""
+    CALL OPF(FN.FOLDER,F.FOLDER)
+
+    FN.FOLDER.BAK = "/t24/t24pro/bnk/bnk.run/SWIFT.IN.BAK"
+    F.FOLDER.BAK = ""
+    CALL OPF(FN.FOLDER.BAK,F.FOLDER.BAK)
+	
+    FN.AGEN = "F.AGENCY"
+    F.AGEN = ""
+    CALL OPF(FN.AGEN,F.AGEN)
+
+    FN.OFS = "F.OFS.SOURCE"
+    F.OFS = ""
+    CALL OPF(FN.OFS,F.OFS)
+	
+    YOFS.ID = "SWIFTIN"
+
+    READ OFS$SOURCE.REC FROM F.OFS,YOFS.ID ELSE OFS$SOURCE.REC = ""
+
+    RETURN
+
+PROCESS:
+    SEL.CMD = "SELECT ":FN.FOLDER
+    CALL EB.READLIST(SEL.CMD,SEL.LIST,"",NO.OF.REC,RET.CODE)
+
+    FOR J = 1 TO NO.OF.REC
+        YFILE.NAME = SEL.LIST<J>       ;*---like 2323113242.MSG
+
+        READ R.MSG FROM F.FOLDER,YFILE.NAME ELSE R.MSG = ""
+		
+        YCNT = DCOUNT(R.MSG,"$")
+	
+        FOR K = 1 TO YCNT
+            
+            YMSG = R.MSG["$",K,1]   ;*---this holds each message to process
+
+            YMSG = CHANGE(YMSG,CHARX(01),"")
+            YMSG = CHANGE(YMSG,CHARX(03),"")
+
+            IF INDEX(YMSG,"{451:0}}",1) THEN
+                YMSG = YMSG['{451:0}}',2,1]
+            END
+
+            YPOS = INDEX(YMSG,"{2",1) + 4
+            MSG.TYPE = YMSG[YPOS,3]
+
+            IF (MSG.TYPE EQ "950") THEN   ;*---we need to replace the external account on tag25 with the Nostro account in T24
+                YBIC.POS = INDEX(YMSG,"{2",1) + 17
+		
+                YSENDER.BIC = YMSG[YBIC.POS,8]
+
+                YSENDER.CUS.NO = ""
+                CALL DE.SWIFT.BIC(YSENDER.BIC,ID.COMPANY,YSENDER.CUS.NO)
+
+                READ YAGEN.REC FROM F.AGEN,YSENDER.CUS.NO ELSE YAGEN.REC = ""
+
+                IF (YAGEN.REC NE "") THEN
+                    XCNT = DCOUNT(YAGEN.REC<EB.AG.OUR.EXT.ACCT.NO>,@VM)
+
+                    FOR YJJ = 1 TO XCNT
+                        YEXT.ACC = YAGEN.REC<EB.AG.OUR.EXT.ACCT.NO,YJJ>
+
+                        IF INDEX(YMSG,":25:":YEXT.ACC,1) THEN
+                            YT24.ACC = YAGEN.REC<EB.AG.NOSTRO.ACCT.NO,YJJ>
+                            YMSG = CHANGE(YMSG,":25:":YEXT.ACC,":25:":YT24.ACC)
+					
+                            EXIT
+                        END
+
+                    NEXT YJJ
+
+                END
+
+	        END
+
+            YMSG = CHANGE(YMSG,@FM,"<Cr><Lf>")
+            YMSG = CHANGE(YMSG,CHARX(013):CHARX(010),"<Cr><Lf>")
+			
+            YMSG = "DECARRIER=SWIFT,":YMSG   ;*---required for inward SWIFT processing
+            YRESP = ""
+
+            CALL OFS.PROCESS.MANAGER(YMSG,YRESP)
+		
+        NEXT K
+
+        WRITE R.MSG TO F.FOLDER.BAK,YFILE.NAME
+
+        DELETE F.FOLDER,YFILE.NAME
+
+    NEXT J
+
+    RETURN
+
+END
